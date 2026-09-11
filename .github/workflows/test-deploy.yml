@@ -49,6 +49,10 @@ jobs:
       - name: Check community nav entries
         run: bin/files-missing-nav
 
+      - name: Check heading anchors
+        run: python3 bin/add-heading-anchors.py community-docs --versions v0.12 v0.13 v0.14 v0.15 v0.16 next --check
+
+
   # ============================================================
   # Product docs build
   # ============================================================
