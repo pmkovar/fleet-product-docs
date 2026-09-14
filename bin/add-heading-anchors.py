@@ -42,23 +42,38 @@ Usage, from the repository root:
   add-heading-anchors.py docs -n -v         # preview the changes
   add-heading-anchors.py docs \
       --versions v0.14 v0.15                # only these versions
+  add-heading-anchors.py docs \
+      --modules en                          # only these modules
+  add-heading-anchors.py docs \
+      --resolve-attributes                  # resolve {attr} in headings
+  add-heading-anchors.py docs \
+      --attributes-file playbook.yml        # supply global attributes
+  add-heading-anchors.py docs \
+      --ignore "*.draft.adoc" "temp/*"      # ignore matching adoc files
   add-heading-anchors.py docs --check-links # also report references
                                             # that match no heading
                                             # in their target page
   add-heading-anchors.py docs --check       # verify in CI (exit 1 on drift)
 
-ROOT is expected to contain one directory per component version, each laid
-out the Antora way: ROOT/<version>/<modules-dirname>/<module>/<pages-dirname>/...
+DOCSROOT is expected to contain one directory per component version, each laid
+out the Antora way: DOCSROOT/<version>/<modules-dirname>/<module>/<pages-dirname>/...
 (for example docs/next/modules/ROOT/pages/... or
-versions/v2.11/modules/en/pages/...). Pass --modules-dirname/--pages-dirname if
-a repository names those directories differently.
+versions/v2.11/modules/en/pages/...). Pass --modules to only process specific
+modules (e.g. --modules en), or --modules-dirname/--pages-dirname if a
+repository names those directories differently.
 """
 
 import argparse
+import fnmatch
 import posixpath
 import re
 import sys
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 # Names of the Antora directories that make up a page path; overridable via
 # --modules-dirname/--pages-dirname since main() reassigns these before use.
@@ -71,8 +86,12 @@ SKIP_FILENAMES = {"nav.adoc", ".asciidoctorconfig.adoc"}
 HEADING_RE = re.compile(r"^(={1,6})[ \t]+(\S.*?)[ \t]*$")
 # [[an-anchor]] or [[an-anchor,reftext]] on a line of its own
 BLOCK_ANCHOR_RE = re.compile(r"^\[\[([^\[\],]+)(?:,[^\]]*)?\]\][ \t]*$")
-# [#an-anchor] on a line of its own
-ID_ATTR_RE = re.compile(r"^\[#([^\[\],\s]+)\][ \t]*$")
+# [#an-anchor] or [#an-anchor,options] on a line of its own
+ID_ATTR_RE = re.compile(r"^\[#([^\[\],\s]+)(?:,[^\]]*)?\][ \t]*$")
+INLINE_ANCHOR_RE = re.compile(r"\[\[([a-zA-Z0-9_][a-zA-Z0-9_.:-]*)\]\]")
+HTML_ANCHOR_RE = re.compile(
+    r"""<(?:a\s+[^>]*\b(?:id|name)|[a-zA-Z0-9]+\s+[^>]*\bid)=["']([^"']+)["']"""
+)
 # Any other block attribute line, such as [discrete], that may sit between an
 # anchor and the heading both belong to.
 ATTR_LINE_RE = re.compile(r"^\[[^\]]*\][ \t]*$")
@@ -121,11 +140,34 @@ def literal_id(title):
     )
 
 
-def resolved_id(title, attributes):
-    """The ID Asciidoctor generates on its own, with attributes resolved."""
-    return slugify(
-        ATTR_REF_RE.sub(lambda m: attributes.get(m.group(1), m.group(0)), title)
+def expand_attribute_value(val, attributes, depth=0):
+    """Recursively expand {attr} references in an attribute value up to max depth."""
+    if depth > 5 or not val or "{" not in val:
+        return val
+    return ATTR_REF_RE.sub(
+        lambda m: expand_attribute_value(attributes.get(m.group(1), m.group(0)), attributes, depth + 1),
+        val,
     )
+
+
+def resolved_id(title, attributes, path=None, line=None, warnings=None):
+    """The ID generated with attributes resolved.
+
+    If an attribute cannot be resolved and warnings is provided, a warning
+    is emitted and the attribute name is used as fallback.
+    """
+    def replace(m):
+        attr_name = m.group(1)
+        if attr_name in attributes:
+            return expand_attribute_value(attributes[attr_name], attributes)
+        if warnings is not None and path is not None and line is not None:
+            warnings.append(
+                "%s:%d: unresolved attribute {%s} in heading %r, falling back to literal name"
+                % (path, line, attr_name, title)
+            )
+        return re.sub(r"[^a-z0-9]", "", attr_name.lower())
+
+    return slugify(ATTR_REF_RE.sub(replace, title))
 
 
 def uniquify(candidate, used):
@@ -233,6 +275,35 @@ def collect_headings(lines):
     return headings
 
 
+def collect_extra_anchors(lines, skip_lines=None):
+    """Collect explicit anchors from lines not attached to headings."""
+    anchors = set()
+    open_blocks = []
+    skip = skip_lines or set()
+    for index, line in enumerate(lines):
+        delimiter = DELIM_RE.match(line)
+        if delimiter:
+            token = delimiter.group(1)
+            if open_blocks and open_blocks[-1] == token:
+                open_blocks.pop()
+            elif not (open_blocks and is_verbatim(open_blocks[-1])):
+                open_blocks.append(token)
+            continue
+        if open_blocks and is_verbatim(open_blocks[-1]):
+            continue
+        if index in skip:
+            continue
+        m = ID_ATTR_RE.match(line) or BLOCK_ANCHOR_RE.match(line)
+        if m:
+            anchors.add(m.group(1))
+            continue
+        for m in INLINE_ANCHOR_RE.finditer(line):
+            anchors.add(m.group(1))
+        for m in HTML_ANCHOR_RE.finditer(line):
+            anchors.add(m.group(1))
+    return anchors
+
+
 def page_key(path):
     """(component version dir, module, path below pages/) of an Antora page."""
     parts = path.parts
@@ -248,25 +319,118 @@ def page_key(path):
     )
 
 
+def module_of(path):
+    """The Antora module name of a path, or None if outside modules/."""
+    parts = path.parts
+    if MODULES_DIRNAME not in parts:
+        return None
+    modules_at = parts.index(MODULES_DIRNAME)
+    if len(parts) > modules_at + 1:
+        return parts[modules_at + 1]
+    return None
+
+
+def normalize_list(items):
+    """Flatten and strip comma- or space-separated CLI values."""
+    if not items:
+        return None
+    result = []
+    for item in items:
+        for part in item.split(","):
+            part = part.strip()
+            if part:
+                result.append(part)
+    return result if result else None
+
+
+PAGE_ATTR_RE = re.compile(r"^:([A-Za-z0-9_-]+):\s*(.*?)\s*$")
+
+
+def clean_attribute_value(val):
+    """Normalize attribute value: convert to str, strip whitespace, quotes, and soft-set @."""
+    if val is None:
+        return ""
+    val = str(val).strip()
+    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+        val = val[1:-1].strip()
+    if val.endswith("@"):
+        val = val[:-1].strip()
+    return val
+
+
+def extract_yaml_attributes(data):
+    """Extract attributes dictionary from parsed YAML data."""
+    if not isinstance(data, dict):
+        return {}
+    attrs = {}
+    if "asciidoc" in data and isinstance(data["asciidoc"], dict):
+        if "attributes" in data["asciidoc"] and isinstance(data["asciidoc"]["attributes"], dict):
+            for k, v in data["asciidoc"]["attributes"].items():
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    attrs[str(k)] = clean_attribute_value(v)
+    if "attributes" in data and isinstance(data["attributes"], dict):
+        for k, v in data["attributes"].items():
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                attrs[str(k)] = clean_attribute_value(v)
+    for k, v in data.items():
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            attrs[str(k)] = clean_attribute_value(v)
+    return attrs
+
+
+def parse_yaml_attributes_regex(text):
+    """Fallback line-by-line regex parser for attributes in YAML."""
+    attrs = {}
+    in_attrs = False
+    for line in text.splitlines():
+        if re.match(r"^\s*attributes:\s*$", line):
+            in_attrs = True
+            continue
+        if in_attrs:
+            if line.strip() and not line.startswith(" "):
+                in_attrs = False
+            else:
+                m = re.match(r"^\s+([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
+                if m:
+                    attrs[m.group(1)] = clean_attribute_value(m.group(2))
+                    continue
+        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
+        if m and not line.startswith(" "):
+            attrs[m.group(1)] = clean_attribute_value(m.group(2))
+    return attrs
+
+
+def load_yaml_attributes(path):
+    """Load attributes from a YAML file (antora.yml, playbook, or attributes file)."""
+    p = Path(path)
+    if not p.is_file():
+        return {}
+    text = p.read_text(encoding="utf-8")
+    if yaml is not None:
+        try:
+            data = yaml.safe_load(text)
+            return extract_yaml_attributes(data)
+        except Exception:
+            pass
+    return parse_yaml_attributes_regex(text)
+
+
 def read_attributes(version_dir):
     """The asciidoc attributes of a component version, read from antora.yml."""
-    attributes = {}
-    antora = Path(version_dir) / "antora.yml"
-    if not antora.is_file():
-        return attributes
-    in_attributes = False
-    for line in antora.read_text(encoding="utf-8").splitlines():
-        if re.match(r"^\s*attributes:\s*$", line):
-            in_attributes = True
-            continue
-        if not in_attributes:
-            continue
-        entry = re.match(r"^\s+([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
-        if entry:
-            attributes[entry.group(1)] = entry.group(2).strip("'\"")
-        elif line.strip() and not line.startswith(" "):
-            in_attributes = False
-    return attributes
+    return load_yaml_attributes(Path(version_dir) / "antora.yml")
+
+
+def read_page_attributes(lines):
+    """Extract document-level attribute definitions from an AsciiDoc file header."""
+    attrs = {}
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("=="):
+            break
+        m = PAGE_ATTR_RE.match(line)
+        if m:
+            attrs[m.group(1)] = clean_attribute_value(m.group(2))
+    return attrs
 
 
 class Page:
@@ -280,7 +444,7 @@ class Page:
         self.anchors = 0
 
 
-def plan_file(path, attributes, warnings):
+def plan_file(path, attributes, warnings, resolve_attributes=False):
     """Work out the anchors of one file and the text it should end up with.
 
     Every heading's anchor is recomputed from its own title and compared
@@ -296,8 +460,29 @@ def plan_file(path, attributes, warnings):
     used_old, used_new = set(), set()
     edits = []
 
-    for heading in collect_headings(lines):
-        new_id = literal_id(heading.title)
+    page_attrs = dict(attributes)
+    page_attrs.update(read_page_attributes(lines))
+
+    headings = collect_headings(lines)
+    heading_anchor_lines = set()
+    for heading in headings:
+        heading_anchor_lines.update(heading.anchor_lines)
+
+    extra_anchors = collect_extra_anchors(lines, skip_lines=heading_anchor_lines)
+    used_new.update(extra_anchors)
+    page.new_ids.update(extra_anchors)
+
+    for heading in headings:
+        if resolve_attributes:
+            new_id = resolved_id(
+                heading.title,
+                page_attrs,
+                path=path,
+                line=heading.index + 1,
+                warnings=warnings,
+            )
+        else:
+            new_id = literal_id(heading.title)
         if new_id == "_":
             warnings.append(
                 "%s:%d: no usable anchor for heading %r, skipped"
@@ -313,7 +498,7 @@ def plan_file(path, attributes, warnings):
             for old_id in old_ids:
                 used_old.add(old_id)
         else:
-            old_ids = [uniquify(resolved_id(heading.title, attributes), used_old)]
+            old_ids = [uniquify(resolved_id(heading.title, page_attrs), used_old)]
 
         page.new_ids.add(new_id)
         for old_id in old_ids:
@@ -403,34 +588,107 @@ def rewrite_references(path, source_key, index, warnings, check_links):
         return "xref:%s#%s[" % (location, anchor_now)
 
     def replace_internal(match):
-        anchor = match.group(1)
-        anchor_now = new_anchor(source_key, anchor, "<<%s>>" % anchor)
+        raw_target = match.group(1)
+        location, sep, anchor = raw_target.rpartition("#")
+        if not sep:
+            anchor = raw_target
+            target_k = source_key
+            prefix = ""
+        else:
+            target_k = target_page(location, source_key) if location else source_key
+            prefix = "%s#" % location
+
+        if not anchor:
+            return match.group(0)
+
+        anchor_now = new_anchor(target_k, anchor, "<<%s>>" % raw_target)
         if anchor_now is None:
             return match.group(0)
-        return "<<%s%s>>" % (anchor_now, match.group(2))
+        return "<<%s%s%s>>" % (prefix, anchor_now, match.group(2))
 
     new_text = XREF_RE.sub(replace_xref, text)
     new_text = INTERNAL_XREF_RE.sub(replace_internal, new_text)
     return new_text if new_text != text else None, rewrites
 
 
-def collect_files(root, versions):
-    """The .adoc files to process: all of ROOT, or only its --versions subdirs."""
-    if root.is_file():
+def should_ignore(path, patterns, docsroot=None):
+    """True if path matches any ignore pattern (supports wildcards and filenames)."""
+    if not patterns:
+        return False
+    posix_path = path.as_posix()
+    posix_name = path.name
+    rel_path = None
+    if docsroot:
+        try:
+            rel_path = path.relative_to(docsroot).as_posix()
+        except ValueError:
+            pass
+
+    for pattern in patterns:
+        clean_pat = pattern.strip()
+        if not clean_pat:
+            continue
+        # Direct filename match (e.g. 'foo.adoc', '*.draft.adoc')
+        if fnmatch.fnmatch(posix_name, clean_pat):
+            return True
+        # Direct full path match (e.g. 'versions/v2.15/**/*.adoc', '*/air-gapped/*')
+        if fnmatch.fnmatch(posix_path, clean_pat):
+            return True
+        # Normalized pattern without leading './' or '/'
+        norm_pat = clean_pat
+        if norm_pat.startswith("./"):
+            norm_pat = norm_pat[2:]
+        norm_pat = norm_pat.lstrip("/")
+        if fnmatch.fnmatch(posix_path, norm_pat):
+            return True
+        if fnmatch.fnmatch(posix_path, f"*/{norm_pat}"):
+            return True
+        if rel_path is not None:
+            if fnmatch.fnmatch(rel_path, clean_pat) or fnmatch.fnmatch(rel_path, norm_pat):
+                return True
+            if fnmatch.fnmatch(rel_path, f"*/{norm_pat}"):
+                return True
+    return False
+
+
+def collect_files(
+    docsroot, versions, modules=None, exclude_modules=None, ignore_patterns=None
+):
+    """The .adoc files to process: all of DOCSROOT, or only its --versions/--modules subdirs."""
+    if docsroot.is_file():
         if versions:
-            sys.exit("error: --versions requires ROOT to be a directory")
-        return [root]
-    if not root.is_dir():
-        sys.exit("error: %s does not exist" % root)
+            sys.exit("error: --versions requires DOCSROOT to be a directory")
+        if modules:
+            sys.exit("error: --modules requires DOCSROOT to be a directory")
+        if exclude_modules:
+            sys.exit("error: --exclude-modules requires DOCSROOT to be a directory")
+        if should_ignore(docsroot, ignore_patterns, docsroot.parent):
+            return []
+        return [docsroot]
+    if not docsroot.is_dir():
+        sys.exit("error: %s does not exist" % docsroot)
     if not versions:
-        return sorted(root.rglob("*.adoc"))
+        candidates = sorted(docsroot.rglob("*.adoc"))
+    else:
+        candidates = []
+        for version in versions:
+            version_dir = docsroot / version
+            if not version_dir.is_dir():
+                sys.exit("error: version directory %s does not exist" % version_dir)
+            candidates.extend(sorted(version_dir.rglob("*.adoc")))
 
     files = []
-    for version in versions:
-        version_dir = root / version
-        if not version_dir.is_dir():
-            sys.exit("error: version directory %s does not exist" % version_dir)
-        files.extend(sorted(version_dir.rglob("*.adoc")))
+    modules_set = set(modules) if modules else None
+    exclude_set = set(exclude_modules) if exclude_modules else set()
+    for path in candidates:
+        if should_ignore(path, ignore_patterns, docsroot):
+            continue
+        mod = module_of(path)
+        if modules_set is not None and mod not in modules_set:
+            continue
+        if mod in exclude_set:
+            continue
+        files.append(path)
     return files
 
 
@@ -444,13 +702,24 @@ def main():
         epilog="Run from the repository root.",
     )
     parser.add_argument(
-        "root",
+        "docsroot",
+        metavar="DOCSROOT",
         help="documentation root directory to process, e.g. docs or versions",
     )
     parser.add_argument(
         "--versions", nargs="+", metavar="VERSION",
-        help="only process these version subdirectories of ROOT, "
+        help="only process these version subdirectories of DOCSROOT, "
         "e.g. --versions v0.14 v0.15",
+    )
+    parser.add_argument(
+        "--modules", "--module", nargs="+", metavar="MODULE",
+        help="only process these module subdirectories of <modules-dirname>, "
+        "e.g. --modules en or --modules ROOT",
+    )
+    parser.add_argument(
+        "--exclude-modules", "--exclude-module", nargs="+", metavar="MODULE",
+        help="exclude these module subdirectories of <modules-dirname>, "
+        "e.g. --exclude-modules zh ja",
     )
     parser.add_argument(
         "--modules-dirname", default=MODULES_DIRNAME,
@@ -461,6 +730,22 @@ def main():
         "--pages-dirname", default=PAGES_DIRNAME,
         help="name of the Antora pages directory in the page path "
         "(default: %s)" % PAGES_DIRNAME,
+    )
+    parser.add_argument(
+        "--resolve-attributes", action="store_true",
+        help="resolve AsciiDoc attributes in headings when generating anchors "
+        "(e.g. {rke2-product-name} -> rke2 instead of rke2productname)",
+    )
+    parser.add_argument(
+        "--attributes-file", nargs="+", metavar="FILE",
+        help="path to YAML attribute file(s) (e.g. playbook-community-local.yml); "
+        "implies --resolve-attributes",
+    )
+    parser.add_argument(
+        "--ignore", "--ignore-files", "--exclude-files",
+        nargs="+", metavar="PATTERN", dest="ignore_files",
+        help="ignore .adoc files matching the given pattern(s) or filename(s); "
+        "supports wildcards (*, ?, **)",
     )
     parser.add_argument(
         "-n", "--dry-run", action="store_true",
@@ -489,10 +774,27 @@ def main():
     if args.check:
         args.dry_run = True
 
+    if args.attributes_file:
+        args.resolve_attributes = True
+
     MODULES_DIRNAME = args.modules_dirname
     PAGES_DIRNAME = args.pages_dirname
 
-    files = collect_files(Path(args.root), args.versions)
+    global_attributes = {}
+    if args.attributes_file:
+        for attr_file in args.attributes_file:
+            attr_path = Path(attr_file)
+            if not attr_path.is_file():
+                sys.exit("error: attributes file %s does not exist" % attr_path)
+            global_attributes.update(load_yaml_attributes(attr_path))
+
+    files = collect_files(
+        Path(args.docsroot),
+        args.versions,
+        normalize_list(args.modules),
+        normalize_list(args.exclude_modules),
+        ignore_patterns=normalize_list(args.ignore_files),
+    )
     if not files:
         sys.exit("error: no .adoc files found")
 
@@ -509,9 +811,16 @@ def main():
         key = page_key(path)
         version_dir = key[0] if key else str(path.parent)
         if version_dir not in attributes_cache:
-            attributes_cache[version_dir] = read_attributes(version_dir)
+            version_attrs = dict(global_attributes)
+            version_attrs.update(read_attributes(version_dir))
+            attributes_cache[version_dir] = version_attrs
 
-        page = plan_file(path, attributes_cache[version_dir], warnings)
+        page = plan_file(
+            path,
+            attributes_cache[version_dir],
+            warnings,
+            resolve_attributes=args.resolve_attributes,
+        )
         if key:
             index[key] = page
         if not page.anchors or path.resolve() in written:
@@ -545,7 +854,7 @@ def main():
         if args.check and anchors > 0:
             print(
                 "error: heading anchors are out of date. "
-                "Run 'bin/add-heading-anchors.py' to update them.",
+                "Run 'add-heading-anchors.py' to update them.",
                 file=sys.stderr,
             )
             failed = True
@@ -595,7 +904,7 @@ def main():
     if args.check and (anchors > 0 or rewrites > 0):
         print(
             "error: heading anchors or references are out of date. "
-            "Run 'bin/add-heading-anchors.py' to update them.",
+            "Run 'add-heading-anchors.py' to update them.",
             file=sys.stderr,
         )
         failed = True
