@@ -1,0 +1,36 @@
+name: Comment heading check warnings on PR
+
+on:
+  workflow_run:
+    workflows: ["Test deployment"]
+    types: [completed]
+
+jobs:
+  comment:
+    name: Post PR comment
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    # Only run if the completed workflow run was triggered by a pull_request
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - name: Download warnings artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: heading-check-pr-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      - name: Comment warnings on PR
+        if: hashFiles('heading-check-summary.md') != '' && hashFiles('pr_number.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(cat pr_number.txt)
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --body-file heading-check-summary.md \
+            --edit-last --create-if-none
+
