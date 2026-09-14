@@ -113,7 +113,7 @@ INVALID_ID_CHARS_RE = re.compile(r"[^\w \-.]")
 ID_SEPARATOR_RE = re.compile(r"[ \-._]+")
 
 XREF_RE = re.compile(r"xref:([^\[\]\s]+)\[")
-INTERNAL_XREF_RE = re.compile(r"<<([^<>,\s]+)((?:,[^<>]*)?)>>")
+INTERNAL_XREF_RE = re.compile(r"<<([^\s<>,]+(?:[^\n<>,]*[^\s<>,])?)((?:,[^<>\n]*)?)>>")
 # An xref target that is a bare ID in the same page rather than a resource
 IN_PAGE_XREF_RE = re.compile(r"^[\w.-]+$")
 
@@ -440,6 +440,7 @@ class Page:
         self.path = path
         self.id_map = {}    # ID that used to resolve here -> ID that does now
         self.new_ids = set()
+        self.heading_titles = set()
         self.new_text = None
         self.anchors = 0
 
@@ -473,6 +474,10 @@ def plan_file(path, attributes, warnings, resolve_attributes=False):
     page.new_ids.update(extra_anchors)
 
     for heading in headings:
+        page.heading_titles.add(heading.title)
+        if "{" in heading.title:
+            page.heading_titles.add(expand_attribute_value(heading.title, page_attrs))
+
         if resolve_attributes:
             new_id = resolved_id(
                 heading.title,
@@ -556,7 +561,11 @@ def rewrite_references(path, source_key, index, warnings, check_links):
         if anchor in page.id_map:
             rewrites.append((anchor, page.id_map[anchor]))
             return page.id_map[anchor]
-        if check_links and anchor not in page.new_ids:
+        if (
+            check_links
+            and anchor not in page.new_ids
+            and not (key == source_key and anchor in page.heading_titles)
+        ):
             warnings.append(
                 "%s: '%s' matches no heading in %s" % (path, reference, page.path)
             )
