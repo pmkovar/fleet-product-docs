@@ -65,6 +65,7 @@ repository names those directories differently.
 
 import argparse
 import fnmatch
+import html
 import os
 import posixpath
 import re
@@ -762,7 +763,7 @@ def report_github_actions_warnings(warnings, summary_file=None):
     for file_path, line_no, msg, _ in parsed_warnings:
         f_str = ("`%s`" % file_path) if file_path else "—"
         l_str = line_no if line_no else "—"
-        table_msg = msg.replace("|", "\\|")
+        table_msg = html.escape(msg, quote=False).replace("|", "\\|")
         summary_lines.append("| %s | %s | %s |" % (f_str, l_str, table_msg))
     summary_lines.append("\n")
     markdown_content = "\n".join(summary_lines)
