@@ -702,9 +702,18 @@ def collect_files(
     return files
 
 
-def report_github_actions_warnings(warnings):
+def report_github_actions_warnings(warnings, summary_file=None):
     """Emit GitHub Actions workflow annotations and step summary when in CI."""
-    if not warnings or os.environ.get("GITHUB_ACTIONS") != "true":
+    is_github_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    if not is_github_actions and not summary_file:
+        return
+
+    if not warnings:
+        if summary_file and os.path.exists(summary_file):
+            try:
+                os.remove(summary_file)
+            except OSError:
+                pass
         return
 
     parsed_warnings = []
@@ -721,33 +730,44 @@ def report_github_actions_warnings(warnings):
 
         parsed_warnings.append((file_path, line_no, msg, warning))
 
-        escaped_msg = (
-            msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        )
-        if file_path and line_no:
-            print("::warning file=%s,line=%s::%s" % (file_path, line_no, escaped_msg))
-        elif file_path:
-            print("::warning file=%s::%s" % (file_path, escaped_msg))
-        else:
-            print("::warning::%s" % escaped_msg)
+        if is_github_actions:
+            escaped_msg = (
+                msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            )
+            if file_path and line_no:
+                print("::warning file=%s,line=%s::%s" % (file_path, line_no, escaped_msg))
+            elif file_path:
+                print("::warning file=%s::%s" % (file_path, escaped_msg))
+            else:
+                print("::warning::%s" % escaped_msg)
 
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_path:
+    summary_lines = [
+        "### ⚠️ Heading & Link Verification Warnings\n",
+        "Encountered **%d** warning(s) during anchor and link verification:\n"
+        % len(warnings),
+        "| File | Line | Warning |",
+        "| :--- | :--- | :--- |",
+    ]
+    for file_path, line_no, msg, _ in parsed_warnings:
+        f_str = ("`%s`" % file_path) if file_path else "—"
+        l_str = line_no if line_no else "—"
+        table_msg = msg.replace("|", "\\|")
+        summary_lines.append("| %s | %s | %s |" % (f_str, l_str, table_msg))
+    summary_lines.append("\n")
+    markdown_content = "\n".join(summary_lines)
+
+    if summary_file:
         try:
-            with open(summary_path, "a", encoding="utf-8") as f:
-                f.write("### ⚠️ Heading & Link Verification Warnings\n\n")
-                f.write(
-                    "Encountered **%d** warning(s) during anchor and link verification:\n\n"
-                    % len(warnings)
-                )
-                f.write("| File | Line | Warning |\n")
-                f.write("| :--- | :--- | :--- |\n")
-                for file_path, line_no, msg, _ in parsed_warnings:
-                    f_str = ("`%s`" % file_path) if file_path else "—"
-                    l_str = line_no if line_no else "—"
-                    table_msg = msg.replace("|", "\\|")
-                    f.write("| %s | %s | %s |\n" % (f_str, l_str, table_msg))
-                f.write("\n")
+            with open(summary_file, "w", encoding="utf-8") as f:
+                f.write(markdown_content)
+        except OSError as e:
+            print("warning: failed to write to %s: %s" % (summary_file, e), file=sys.stderr)
+
+    step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if is_github_actions and step_summary_path:
+        try:
+            with open(step_summary_path, "a", encoding="utf-8") as f:
+                f.write(markdown_content)
         except OSError as e:
             print("warning: failed to write to GITHUB_STEP_SUMMARY: %s" % e, file=sys.stderr)
 
@@ -828,8 +848,17 @@ def main():
         "--check-links", action="store_true",
         help="also report references that match no heading in their target page",
     )
+    parser.add_argument(
+        "--summary-file", metavar="FILE",
+        help="path to write Markdown summary of warnings (defaults to "
+        "heading-check-summary.md when running in GitHub Actions)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="list every change")
     args = parser.parse_args()
+
+    summary_file = args.summary_file
+    if summary_file is None and os.environ.get("GITHUB_ACTIONS") == "true":
+        summary_file = "heading-check-summary.md"
 
     if args.check:
         args.dry_run = True
@@ -910,7 +939,7 @@ def main():
             print("Left references to %d renamed anchor(s) alone (--no-xrefs)" % stale)
         for warning in warnings:
             print("warning: %s" % warning, file=sys.stderr)
-        report_github_actions_warnings(warnings)
+        report_github_actions_warnings(warnings, summary_file=summary_file)
         failed = False
         if args.check and anchors > 0:
             print(
@@ -969,7 +998,7 @@ def main():
     for warning in warnings:
         print("warning: %s" % warning, file=sys.stderr)
 
-    report_github_actions_warnings(warnings)
+    report_github_actions_warnings(warnings, summary_file=summary_file)
 
     failed = False
     if args.check and (anchors > 0 or rewrites > 0):
