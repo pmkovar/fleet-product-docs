@@ -1,5 +1,5 @@
 = Namespaces
-:revdate: 2025-07-23
+:revdate: 2026-09-14
 :page-revdate: {revdate}
 :page-aliases: /namespaces
 
@@ -75,7 +75,7 @@ created bundles from git by putting labels in the `fleet.yaml` file or on the
 
 [IMPORTANT]
 ====
-The `GitRepoRestriction` resource is deprecated and would be removed in a future release. For comprehensive multi-tenant environment governance, it is highly recommended to use the new `Policy` resource instead. For more information, refer to xref:_restricting_what_tenants_may_do_in_a_namespace[restricting tenant deployments for multi tenancy].
+The `GitRepoRestriction` resource is deprecated and would be removed in a future release. For comprehensive multi-tenant environment governance, it is highly recommended to use the new `Policy` resource instead. For more information, refer to xref:_rstricting_what_tenants_may_do_in_a_namespace[restricting tenant deployments for multi tenancy].
 ====
 
 A namespace can contain multiple `GitRepoRestriction` resources. All `GitRepos`
