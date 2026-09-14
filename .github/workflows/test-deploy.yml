@@ -13,9 +13,6 @@ jobs:
   test-community:
     name: Test community docs
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     # Only runs if the PR is targeting the 'main' branch
     if: github.base_ref == 'main'
 
@@ -55,13 +52,19 @@ jobs:
       - name: Check heading anchors
         run: python3 bin/add-heading-anchors.py community-docs --check --check-links --versions v0.12 v0.13 v0.14 v0.15 v0.16 next
 
-      - name: Comment warnings on PR
+      - name: Save PR number
         if: hashFiles('heading-check-summary.md') != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body-file heading-check-summary.md --edit-last --create-if-none || true
+        run: echo "${{ github.event.pull_request.number }}" > pr_number.txt
+
+      - name: Upload heading check warnings artifact
+        if: hashFiles('heading-check-summary.md') != ''
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: heading-check-pr-comment
+          path: |
+            heading-check-summary.md
+            pr_number.txt
+          retention-days: 1
 
 
   # ============================================================
