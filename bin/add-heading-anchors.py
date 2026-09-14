@@ -555,7 +555,7 @@ def rewrite_references(path, source_key, index, warnings, check_links):
     text = path.read_text(encoding="utf-8")
     rewrites = []
 
-    def new_anchor(key, anchor, reference):
+    def new_anchor(key, anchor, reference, line_no=None):
         page = index.get(key) if key else None
         if page is None:
             return None
@@ -567,18 +567,25 @@ def rewrite_references(path, source_key, index, warnings, check_links):
             and anchor not in page.new_ids
             and not (key == source_key and anchor in page.heading_titles)
         ):
-            warnings.append(
-                "%s: '%s' matches no heading in %s" % (path, reference, page.path)
-            )
+            if line_no is not None:
+                warnings.append(
+                    "%s:%d: '%s' matches no heading in %s"
+                    % (path, line_no, reference, page.path)
+                )
+            else:
+                warnings.append(
+                    "%s: '%s' matches no heading in %s" % (path, reference, page.path)
+                )
         return None
 
     def replace_xref(match):
+        line_no = text[:match.start()].count("\n") + 1
         target = match.group(1)
         if "#" not in target:
             # xref:an-anchor[] is a reference to an ID in the same page.
             if target.endswith(".adoc") or not IN_PAGE_XREF_RE.match(target):
                 return match.group(0)
-            anchor_now = new_anchor(source_key, target, "xref:" + target)
+            anchor_now = new_anchor(source_key, target, "xref:" + target, line_no=line_no)
             if anchor_now is None:
                 return match.group(0)
             return "xref:%s[" % anchor_now
@@ -587,17 +594,19 @@ def rewrite_references(path, source_key, index, warnings, check_links):
             return match.group(0)
         if location and ("@" in location or ":" in location):
             warnings.append(
-                "%s: cross-component 'xref:%s' left alone" % (path, target)
+                "%s:%d: cross-component 'xref:%s' left alone"
+                % (path, line_no, target)
             )
             return match.group(0)
         anchor_now = new_anchor(
-            target_page(location, source_key), anchor, "xref:" + target
+            target_page(location, source_key), anchor, "xref:" + target, line_no=line_no
         )
         if anchor_now is None:
             return match.group(0)
         return "xref:%s#%s[" % (location, anchor_now)
 
     def replace_internal(match):
+        line_no = new_text[:match.start()].count("\n") + 1
         raw_target = match.group(1)
         location, sep, anchor = raw_target.rpartition("#")
         if not sep:
@@ -611,7 +620,9 @@ def rewrite_references(path, source_key, index, warnings, check_links):
         if not anchor:
             return match.group(0)
 
-        anchor_now = new_anchor(target_k, anchor, "<<%s>>" % raw_target)
+        anchor_now = new_anchor(
+            target_k, anchor, "<<%s>>" % raw_target, line_no=line_no
+        )
         if anchor_now is None:
             return match.group(0)
         return "<<%s%s%s>>" % (prefix, anchor_now, match.group(2))
