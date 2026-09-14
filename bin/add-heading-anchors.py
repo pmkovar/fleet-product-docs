@@ -65,6 +65,7 @@ repository names those directories differently.
 
 import argparse
 import fnmatch
+import os
 import posixpath
 import re
 import sys
@@ -701,6 +702,56 @@ def collect_files(
     return files
 
 
+def report_github_actions_warnings(warnings):
+    """Emit GitHub Actions workflow annotations and step summary when in CI."""
+    if not warnings or os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+
+    parsed_warnings = []
+    for warning in warnings:
+        m = re.match(r"^(.+?):(\d+):\s*(.*)$", warning)
+        if m:
+            file_path, line_no, msg = m.group(1), m.group(2), m.group(3)
+        else:
+            m = re.match(r"^(.+?):\s*(.*)$", warning)
+            if m:
+                file_path, line_no, msg = m.group(1), None, m.group(2)
+            else:
+                file_path, line_no, msg = None, None, warning
+
+        parsed_warnings.append((file_path, line_no, msg, warning))
+
+        escaped_msg = (
+            msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        )
+        if file_path and line_no:
+            print("::warning file=%s,line=%s::%s" % (file_path, line_no, escaped_msg))
+        elif file_path:
+            print("::warning file=%s::%s" % (file_path, escaped_msg))
+        else:
+            print("::warning::%s" % escaped_msg)
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        try:
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write("### ⚠️ Heading & Link Verification Warnings\n\n")
+                f.write(
+                    "Encountered **%d** warning(s) during anchor and link verification:\n\n"
+                    % len(warnings)
+                )
+                f.write("| File | Line | Warning |\n")
+                f.write("| :--- | :--- | :--- |\n")
+                for file_path, line_no, msg, _ in parsed_warnings:
+                    f_str = ("`%s`" % file_path) if file_path else "—"
+                    l_str = line_no if line_no else "—"
+                    table_msg = msg.replace("|", "\\|")
+                    f.write("| %s | %s | %s |\n" % (f_str, l_str, table_msg))
+                f.write("\n")
+        except OSError as e:
+            print("warning: failed to write to GITHUB_STEP_SUMMARY: %s" % e, file=sys.stderr)
+
+
 def main():
     global MODULES_DIRNAME, PAGES_DIRNAME
 
@@ -859,6 +910,7 @@ def main():
             print("Left references to %d renamed anchor(s) alone (--no-xrefs)" % stale)
         for warning in warnings:
             print("warning: %s" % warning, file=sys.stderr)
+        report_github_actions_warnings(warnings)
         failed = False
         if args.check and anchors > 0:
             print(
@@ -867,6 +919,14 @@ def main():
                 file=sys.stderr,
             )
             failed = True
+        elif args.check:
+            if warnings:
+                print(
+                    "All heading anchors are up to date, but %d warning(s) were encountered."
+                    % len(warnings)
+                )
+            else:
+                print("All heading anchors are up to date.")
         if args.fail_on_warnings and warnings:
             print("error: %d warning(s) encountered." % len(warnings), file=sys.stderr)
             failed = True
@@ -909,6 +969,8 @@ def main():
     for warning in warnings:
         print("warning: %s" % warning, file=sys.stderr)
 
+    report_github_actions_warnings(warnings)
+
     failed = False
     if args.check and (anchors > 0 or rewrites > 0):
         print(
@@ -918,7 +980,13 @@ def main():
         )
         failed = True
     elif args.check:
-        print("All heading anchors and references are up to date.")
+        if warnings:
+            print(
+                "All heading anchors and references are up to date, but %d warning(s) were encountered."
+                % len(warnings)
+            )
+        else:
+            print("All heading anchors and references are up to date.")
 
     if args.fail_on_warnings and warnings:
         print(
