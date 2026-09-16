@@ -1,36 +1,24 @@
 #!/usr/bin/env python3
 
 """
-Add a standard anchor ID to every AsciiDoc heading, except document titles.
+Add/verify/fix anchor ID for every AsciiDoc heading, except document titles.
 
-The anchor of a heading is the Asciidoctor-style slug of the heading text:
-lowercased, with every run of non-word characters replaced by an underscore,
-and prefixed with an underscore, for example
+The anchor of a heading is the Asciidoctor-style slug of the heading text,
+for example:
 
     == Available experimental features
     -> [#_available_experimental_features]
 
-Attribute references are flattened to their *attribute name* rather than to
-their value, so that the same source produces the same anchor in the community
-build and in the product build, where {product_name} has a different value:
-
-    === Enabling when installing {product_name} stand-alone
-    -> [#_enabling_when_installing_productname_stand_alone]
-
-Every existing anchor is validated against the heading it is attached to, not
-just taken on trust, so this also fixes anchors that are already there but do
-not follow the convention, in either the [[old-style]] or the [#new-style]
-form:
+Every anchor is validated against the heading it is attached to, so this also
+fixes anchors that are already there but do not follow the convention,
+in either the [[old-style]] or the [#new-style] form:
 
     [[examining-the-bundle-lifecycle-with-the-cli]]
     -> [#_examining_the_bundle_lifecycle_with_the_cli]
 
-and anchors that are already in the right format but are wrong for their
-heading, including two headings on the same page that were given the same
-anchor by mistake: whichever one of them does not match its own heading's
-title is rewritten, and if both do (typically because the headings share a
-title), the second is renumbered with a trailing _2, _3, ... the same way
-Asciidoctor itself disambiguates a collision.
+and anchors that are are wrong for their heading, including duplicated headings
+with the same anchor. An anchor that does not match its own heading's title is
+rewritten, and if both match, the second is renumbered with a trailing _2, _3.
 
 Unless --no-xrefs is given, every xref: and <<...>> reference to an anchor that
 changed is updated as well. This includes references to the IDs that
@@ -53,12 +41,12 @@ Usage, from the repository root:
   add-heading-anchors.py docs --check-links # also report references
                                             # that match no heading
                                             # in their target page
-  add-heading-anchors.py docs --check       # verify in CI (exit 1 on drift)
+  add-heading-anchors.py docs --check       # only verify (exit 1 on drift)
 
-DOCSROOT is expected to contain one directory per component version, each laid
-out the Antora way: DOCSROOT/<version>/<modules-dirname>/<module>/<pages-dirname>/...
+DOCSROOT is expected to contain one directory per component version, the Antora
+way: DOCSROOT/<version>/<modules-dirname>/<module>/<pages-dirname>/...
 (for example docs/next/modules/ROOT/pages/... or
-versions/v2.11/modules/en/pages/...). Pass --modules to only process specific
+versions/v2.11/modules/en/pages/...). Pass --modules to only process-specific
 modules (e.g. --modules en), or --modules-dirname/--pages-dirname if a
 repository names those directories differently.
 """
@@ -449,11 +437,10 @@ def plan_file(path, attributes, warnings, resolve_attributes=False):
     """Work out the anchors of one file and the text it should end up with.
 
     Every heading's anchor is recomputed from its own title and compared
-    against what is already there; nothing is taken on trust. So an existing
-    anchor is left alone only if it is both the right ID for its heading and
-    the first heading on the page to claim that ID. A wrong anchor, or a
-    correct one that a duplicate elsewhere on the page beat it to, gets
-    rewritten.
+    against what is already there. So an existing anchor is left alone only
+    if it is both the right ID for its heading and the first heading on the
+    page to claim that ID. A wrong anchor, or a correct one that a duplicate
+    elsewhere on the page beat it to, gets rewritten.
     """
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
