@@ -1,4 +1,5 @@
 = fleet cleanup clusterregistration
+:description: Remove outdated cluster registrations from the fleet cleanup process to ensure only current and valid cluster information is maintained in the system
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 
@@ -26,4 +27,4 @@ fleet cleanup clusterregistration [flags]
 [#_see_also]
 == SEE ALSO
 
-* xref:reference/cli/fleet-cli/fleet_cleanup.adoc[fleet cleanup]	 - Clean up outdated resources
+* xref:reference/cli/fleet-cli/cleanup/fleet_cleanup.adoc[fleet cleanup]	 - Clean up outdated resources

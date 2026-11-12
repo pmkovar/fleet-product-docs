@@ -1,5 +1,6 @@
 = fleet.yaml
-:revdate: 2026-03-05
+:description: Create or modify a bundle by using the fleet.yaml file to set options like namespace, labels, and Helm chart settings
+:revdate: 2026-10-06
 :page-revdate: {revdate}
 :page-aliases: /ref-fleet-yaml
 
@@ -33,13 +34,15 @@ defaultNamespace: default
 # Default: ""
 namespace: default
 
-# namespaceLabels are labels that will be appended to the namespace created by
-# Fleet.
+# namespaceLabels replace the labels of the namespace the bundle is deployed to,
+# whether or not Fleet created it. Labels not listed here are removed, except
+# kubernetes.io/metadata.name.
 namespaceLabels:
   key: value
 
-# namespaceAnnotations are annotations that will be appended to the namespace
-# created by Fleet.
+# namespaceAnnotations replace the annotations of the namespace the bundle is
+# deployed to, whether or not Fleet created it. Annotations not listed here are
+# removed.
 namespaceAnnotations:
   key: value
 
@@ -99,6 +102,16 @@ helm:
 
     valueFromEnv:
       "${ .ClusterLabels.ENV }": ${ .ClusterValues.someValue | upper | quote }
+
+  # Values whose content is a template string. Each entry is rendered first and
+  # then parsed as YAML, so templates can generate lists and maps. Each key
+  # becomes a top-level value and replaces the same key from `values`.
+  # This one creates an entry for each host in the Cluster's templateValues.
+  templateValues:
+    ingressHosts: |-
+      ${- range index .ClusterValues "hosts" }
+      - host: ${ . }
+      ${- end }
 
   # Path to any values files that need to be passed to helm during install.
   valuesFiles:
@@ -317,9 +330,9 @@ dependsOn:
   #     opni-fleet-examples-fleets-opni-ui-plugin-operator-crd becomes
   #     opni-fleet-examples-fleets-opni-ui-plugin-opera-021f7
   - name: one-multi-cluster-hello-world
-      acceptedStates:
-        - Ready
-        - Modified
+    acceptedStates:
+      - Ready
+      - Modified
   # Select bundles to depend on based on their label.
   - selector:
       matchLabels:
@@ -360,7 +373,7 @@ These options define the fundamental properties and behavior of the bundle itsel
 
 | `paused` | If true, the bundle will not be updated on downstream clusters. Instead, it will be marked as *OutOfSync*. You can then manually approve the deployment. | All
 | `labels` | A map of key-value pairs set at the bundle level. These can be used in a `dependsOn.selector` to define dependencies. | All
-| `dependsOn` | A list of bundles that this bundle depends on. The current bundle is deployed only after all dependencies are in an accepted state. Accepted states correspond to any valid  xref:reference/ref-status-fields.adoc#_bundle_statuses[bundle states]. | All
+| `dependsOn` | A list of bundles that this bundle depends on. The current bundle is deployed only after all dependencies are in an accepted state. Accepted states correspond to any valid  xref:reference/ref-status-fields.adoc#_bundle_statuses[bundle states]. For how {product_name} waits for dependencies, refer to xref:explanations/ref-bundle-stages.adoc#_dependencies[Dependencies]. | All
 | `ignore` | Specifies fields to ignore when monitoring bundle status. Useful for preventing false error states from Custom Resources. | All
 | `overrideTargets` | A list of target customizations that override any targets defined in the GitRepo. | All
 |===
@@ -375,8 +388,8 @@ These options control the Kubernetes namespace where resources will be deployed.
 
 | `defaultNamespace` | Default namespace for resources that don’t specify one. | All
 | `namespace` | Assigns all resources in the bundle to this namespace. Fails if any cluster-scoped resources exist. | All
-| `namespaceLabels` | Labels to be added to the namespace created by {product_name}. | All
-| `namespaceAnnotations` | Annotations to be added to the namespace created by {product_name}. | All
+| `namespaceLabels` | Labels to set on the namespace the bundle is deployed to, whether or not {product_name} created it. They replace the namespace's labels: labels not listed are removed, except `kubernetes.io/metadata.name`. Since {product_name} v0.16.1, they are applied with the same identity as the deployment, so a `ServiceAccount` used for the deployment needs `get` and `update` on that namespace. See xref:how-tos-for-operators/tenant-setup.adoc#_namespace_labels_and_annotations[Namespace Labels and Annotations]. | All
+| `namespaceAnnotations` | Annotations to set on the namespace the bundle is deployed to, whether or not {product_name} created it. They replace the namespace's annotations: annotations not listed are removed. Since {product_name} v0.16.1, they are applied with the same identity as the deployment, so a `ServiceAccount` used for the deployment needs `get` and `update` on that namespace. See xref:how-tos-for-operators/tenant-setup.adoc#_namespace_labels_and_annotations[Namespace Labels and Annotations]. | All
 |===
 
 [#_helm_bundle_configuration]
@@ -415,6 +428,7 @@ The chart reference can be one of the following:
 * Helm repository (`repo` + `chart` + optional `version`)
 * OCI Helm repository (`repo: oci://...` + `version`)
 
+[#_helm_repo]
 ==== `helm.repo`
 
 For OCI registries, `helm.repo` is the canonical field for the OCI URL. Use it like this:
@@ -428,6 +442,7 @@ helm:
 
 This is consistent with how OCI registries are referenced in xref:how-tos-for-users/helm-ops.adoc#_oci_registry[HelmOp resources].
 
+[#_helm_chart]
 ==== `helm.chart`
 
 Specifies a local path or go-getter URL for the Helm chart. When `helm.repo` is set to a standard (non-OCI) Helm repository URL, `helm.chart` holds the chart name within that repository.
@@ -464,6 +479,7 @@ helm:
 ----
 ====
 
+[#_helm_version]
 ==== `helm.version`
 
 Determines which chart to download from OCI registries.
@@ -483,6 +499,7 @@ Options for customizing Helm chart values.
 | Option | Description | Applies to
 
 | `helm.values` | Key-value pairs passed to Helm as custom values. Supports templating. | Helm
+| `helm.templateValues` | Map of template strings. Each entry is rendered, parsed as YAML and set as a top-level value, replacing the same key from `helm.values`. | Helm
 | `helm.valuesFiles` | Paths to values files passed to Helm. | Helm
 | `helm.valuesFrom` | Load values from ConfigMaps or Secrets in downstream clusters. | Helm
 |===
@@ -546,6 +563,40 @@ Example:
 ${ if hasKey .ClusterLabels "LABELNAME" }${ .ClusterLabels.LABELNAME }${ else }missing${ end}
 ----
 ====
+
+[#_helm_templatevalues]
+==== `helm.templateValues`
+
+Because `helm.values` must be valid YAML before it is templated, you cannot use `range` or `if` there to build lists or maps. `helm.templateValues` lifts this restriction. It is a map of strings, and {product_name} renders each string with the same template context as `helm.values`, then parses the result as YAML.
+
+* Each key becomes a top-level key in the Helm values.
+* If the same key also exists in `helm.values`, the `helm.templateValues` entry replaces it entirely. The two are not merged.
+* Keys in `helm.templateValues` are not available as template variables, so `helm.values` cannot reference them.
+* `helm.templateValues` is not the same as the `templateValues` field of the `Cluster` resource, which templates read as `.ClusterValues`.
+* If `helm.disablePreProcess` is `true`, `helm.templateValues` is ignored.
+
+Example:
+
+[source,yaml]
+----
+helm:
+  templateValues:
+    ingressHosts: |-
+      ${- range index .ClusterValues "hosts" }
+      - host: ${ . }
+      ${- end }
+----
+
+Using `index` keeps the deployment working on clusters that do not set `hosts`. They get no host entries. For a cluster whose `spec.templateValues` contains `hosts: [app.example.com, app.example.org]`, this renders as:
+
+[source,yaml]
+----
+ingressHosts:
+- host: app.example.com
+- host: app.example.org
+----
+
+For more examples, see xref:how-tos-for-users/templating.adoc#_structural_generation_advanced[Structural Generation].
 
 [#_helm_deployment]
 == Helm Deployment
@@ -646,6 +697,7 @@ For detailed examples and merge behavior, see xref:explanations/target-customiza
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.ReleaseName]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.Repo]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.TakeOwnership]
+* xref:/reference/ref-crds.adoc#_helmoptions[Helm.TemplateValues]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.TimeoutSeconds]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.ValuesFrom]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.Values]

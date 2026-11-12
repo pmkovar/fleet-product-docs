@@ -1,4 +1,5 @@
 = Custom Resources Spec
+:description: Understand the structure and components of a custom resource specification for deploying application resources to clusters
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :doctype: book
@@ -820,6 +821,11 @@ BundleDeploymentList contains a list of BundleDeployment
 | false
 |===
 
+[Note]
+====
+If you do not want Fleet to apply the `helm.sh/resource-policy: keep`, configure the `deleteCRDResource` option to `true` in `fleet.yaml`.
+====
+
 <<Resources,Back to Custom Resources>>
 
 
@@ -1083,6 +1089,11 @@ HelmOptions for the deployment. For Helm-based bundles, all options can be used,
 | values
 | Values passed to Helm. It is possible to specify the keys and values as go template strings.
 | *GenericMap
+| false
+
+| templateValues
+| Template Values passed to Helm. It is possible to specify the keys and values as go template strings. Unlike .values, content of each key will be templated first, before serializing to yaml. This allows to template complex values, like ranges and maps. templateValues keys have precedence over values keys in case of conflict.
+| map[string]string
 | false
 
 | valuesFrom
@@ -2369,7 +2380,7 @@ GitRepoResourceCounts contains the number of resources in each state.
 | false
 
 | helmRepoURLRegex
-| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will always be used if this is empty or not provided.
+| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will not be used if this is empty or not provided.
 | string
 | false
 

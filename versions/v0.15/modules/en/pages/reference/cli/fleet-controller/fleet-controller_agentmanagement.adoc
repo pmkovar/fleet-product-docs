@@ -1,5 +1,8 @@
 = fleet-controller agentmanagement
+:description: Manage Fleet agent settings by configuring options that control how the agent interacts with the Fleet controller
+ifeval::["{product}" == "continuous-delivery"]
 :page-languages: [en, de, es, fr, ja, pt, zh]
+endif::[]
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /fleet-controller_agentmanagement

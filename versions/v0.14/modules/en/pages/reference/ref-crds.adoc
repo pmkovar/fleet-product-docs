@@ -1,4 +1,5 @@
 = Custom Resources Spec
+:description: Understand the structure and components of a custom resource specification for deploying application resources to clusters
 :revdate: 2026-02-05
 :page-revdate: {revdate}
 :doctype: book
@@ -245,7 +246,7 @@ BundleResource represents the content of a single resource from the bundle, like
 | false
 
 | dependsOn
-| DependsOn refers to the bundles which must be in an accepted state before this bundle can be deployed.
+| DependsOn refers to the bundles which must be ready before this bundle can be deployed.
 | []<<BundleRef,BundleRef>>
 | false
 
@@ -1094,6 +1095,11 @@ HelmOptions for the deployment. For Helm-based bundles, all options can be used,
 | values
 | Values passed to Helm. It is possible to specify the keys and values as go template strings.
 | *GenericMap
+| false
+
+| templateValues
+| Template Values passed to Helm. It is possible to specify the keys and values as go template strings. Unlike .values, content of each key will be templated first, before serializing to yaml. This allows to template complex values, like ranges and maps. templateValues keys have precedence over values keys in case of conflict.
+| map[string]string
 | false
 
 | valuesFrom
@@ -2380,7 +2386,7 @@ GitRepoResourceCounts contains the number of resources in each state.
 | false
 
 | helmRepoURLRegex
-| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will always be used if this is empty or not provided.
+| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will not be used if this is empty or not provided.
 | string
 | false
 

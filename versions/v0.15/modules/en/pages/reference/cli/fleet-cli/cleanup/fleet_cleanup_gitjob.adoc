@@ -1,5 +1,8 @@
 = fleet cleanup gitjob
+:description: Remove outdated git jobs from your fleet to keep your environment organized and ensure only current tasks run
+ifeval::["{product}" == "continuous-delivery"]
 :page-languages: [en, de, es, fr, ja, pt, zh]
+endif::[]
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /fleet_cleanup_gitjob

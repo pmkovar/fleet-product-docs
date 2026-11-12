@@ -1,4 +1,5 @@
 = Custom Resources Spec
+:description: Understand the structure and components of a custom resource specification for deploying application resources to clusters
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :doctype: book
@@ -819,6 +820,11 @@ BundleDeploymentList contains a list of BundleDeployment
 | bool
 | false
 |===
+
+[Note]
+====
+If you do not want Fleet to apply the `helm.sh/resource-policy: keep`, configure the `deleteCRDResource` option to `true` in `fleet.yaml`.
+====
 
 <<Resources,Back to Custom Resources>>
 
@@ -2369,7 +2375,7 @@ GitRepoResourceCounts contains the number of resources in each state.
 | false
 
 | helmRepoURLRegex
-| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will always be used if this is empty or not provided.
+| HelmRepoURLRegex Helm credentials will be used if the helm repo matches this regex Credentials will not be used if this is empty or not provided.
 | string
 | false
 

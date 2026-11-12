@@ -1,7 +1,8 @@
 :doctype: book
 
 = Installation Details
-:revdate: 2025-07-23
+:description: Installation Details describes how to set up Fleet on a Kubernetes cluster using Helm charts and configure it for single or multi-cluster use
+:revdate: 2026-09-24
 :page-revdate: {revdate}
 :page-aliases: /installation
 
@@ -86,7 +87,7 @@ fleet-controller-64f49d756b-n57wq   1/1     Running   0          3m21s
 
 You can now xref:how-tos-for-users/gitrepo-add.adoc[register Git repositories] in the `fleet-local` namespace to start deploying resources.
 
-[#_tweaking_your_productname_installation]
+[#_tweaking_your_fleet_installation]
 == Tweaking Your {product_name} Installation
 
 [#_controller_and_agent_replicas]
@@ -316,6 +317,7 @@ clusters:
     server: https://example.com:6443
 ----
 
+[#_extract_ca_certificate]
 ==== Extract CA Certificate
 
 The `certificate-authority-data` field is Base64 encoded.  
@@ -340,6 +342,7 @@ For multi-cluster kubeconfigs:
 kubectl config view -o json --raw | jq -r '.clusters[] | select(.name=="CLUSTERNAME").cluster["certificate-authority-data"]' | base64 -d > ca.pem
 ----
 
+[#_extract_api_server]
 ==== Extract API Server
 
 [source,bash]
@@ -348,6 +351,7 @@ API_SERVER_URL=$(kubectl config view -o json --raw | jq -r '.clusters[] | select
 API_SERVER_CA="ca.pem"
 ----
 
+[#_validate]
 ==== Validate
 
 Verify the API server URL:

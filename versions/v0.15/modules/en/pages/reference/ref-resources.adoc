@@ -1,5 +1,8 @@
 = List of Deployed Resources
+:description: List of Deployed Resources shows what happens after installing Fleet in Rancher, including the names of the resources created in the upstream cluster
+ifeval::["{product}" == "continuous-delivery"]
 :page-languages: [en, de, es, fr, ja, pt, zh]
+endif::[]
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /ref-resources

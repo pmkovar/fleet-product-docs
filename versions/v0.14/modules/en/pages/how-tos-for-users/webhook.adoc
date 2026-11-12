@@ -1,4 +1,5 @@
 = Using Webhooks Instead of Polling
+:description: Configure webhooks to replace polling in Fleet and reduce the delay between a Git push and Fleet processing changes by setting up a webhook service
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /webhook
@@ -71,7 +72,7 @@ spec:
                 number: 80
 ----
 
-Ingress Nginx will be https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/[retired], here is an example using Traefik:
+Ingress Nginx has been https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/[retired], here is an example using Traefik:
 
 [source,yaml]
 ----
@@ -130,7 +131,7 @@ You can configure https://kubernetes.io/docs/concepts/services-networking/ingres
 Go to your Git provider and configure the webhook callback URL.  
 The following image shows an example from GitHub.
 
-image:: ../../images/webhook.png[]
+image::webhook.png[webhook example on Github]
 
 Configuring a secret is optional.  
 The secret is used to validate the webhook payload since the payload shouldn’t be trusted by default.

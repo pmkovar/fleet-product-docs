@@ -1,4 +1,5 @@
 = Rollout Strategy
+:description: Understand how to control app deployments across clusters using partitions and rollout strategy settings
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 
@@ -100,6 +101,11 @@ env: prod
 . Starts rollout to the first partition.
 . Waits for readiness.
 . Proceeds to the next partition.
+
+[Note]
+====
+When using manual partitions, Fleet only includes targets that match a configured partition selector in the rollout. Targets that do not match any partition selector are discarded, and no rollout is created for them.
+====
 
 image::deploy-targets-partition.png[A visual asset displaying the flow of partition rollout.]
 

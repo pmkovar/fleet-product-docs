@@ -1,8 +1,11 @@
 = GitRepo Resource
+:description: Create a GitRepo resource to describe a git repository, specify how it is accessed, and locate the bundles, ensuring the resource matches the GitRepoSpec
+ifeval::["{product}" == "continuous-delivery"]
+:page-languages: [en, de, es, fr, ja, pt, zh]
+endif::[]
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /ref-gitrepo
-:page-languages: [en, de, es, fr, ja, pt, zh]
 
 The GitRepo resource describes git repositories, how to access them and where the bundles are located.
 

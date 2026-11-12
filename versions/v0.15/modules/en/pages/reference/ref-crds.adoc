@@ -1,5 +1,8 @@
 = Custom Resources Spec
+:description: Understand the structure and components of a custom resource specification for deploying application resources to clusters
+ifeval::["{product}" == "continuous-delivery"]
 :page-languages: [en, de, es, fr, ja, pt, zh]
+endif::[]
 :revdate: 2026-02-05
 :page-revdate: {revdate}
 :doctype: book
@@ -1095,6 +1098,11 @@ HelmOptions for the deployment. For Helm-based bundles, all options can be used,
 | values
 | Values passed to Helm. It is possible to specify the keys and values as go template strings.
 | *GenericMap
+| false
+
+| templateValues
+| Template Values passed to Helm. It is possible to specify the keys and values as go template strings. Unlike .values, content of each key will be templated first, before serializing to yaml. This allows to template complex values, like ranges and maps. templateValues keys have precedence over values keys in case of conflict.
+| map[string]string
 | false
 
 | valuesFrom

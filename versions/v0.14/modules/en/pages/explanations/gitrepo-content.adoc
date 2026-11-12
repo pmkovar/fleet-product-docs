@@ -1,4 +1,5 @@
 = Git Repository Contents
+:description: Understand what files and structures are in a Git repository and how Fleet uses them to create and manage bundles
 :revdate: 2025-07-23
 :page-revdate: {revdate}
 :page-aliases: /gitrepo-content
@@ -229,7 +230,7 @@ Refer to Rancher's {product_name} docs for more information.
 ====
 
 The available fields are documented in the xref::/reference/ref-fleet-yaml.adoc[fleet.yaml reference].
-For a private Helm repo, users can reference a secret from the git repo resource.
+For a private Helm repo, users can reference a secret from the git repo resource and set `spec.helmRepoURLRegex` to match trusted Helm or OCI repository URLs.
 See xref:how-tos-for-users/gitrepo-add.adoc#_using_private_helm_repositories[Using Private Helm Repositories].
 
 [#_using_helm_values]

@@ -1,4 +1,5 @@
 = fleet.yaml
+:description: Create or modify a bundle by using the fleet.yaml file to set options like namespace, labels, and Helm chart settings
 :revdate: 2026-03-05
 :page-revdate: {revdate}
 :page-aliases: /ref-fleet-yaml
@@ -99,6 +100,16 @@ helm:
 
     valueFromEnv:
       "${ .ClusterLabels.ENV }": ${ .ClusterValues.someValue | upper | quote }
+
+  # Values whose content is a template string. Each entry is rendered first and
+  # then parsed as YAML, so templates can generate lists and maps. Each key
+  # becomes a top-level value and replaces the same key from `values`.
+  # This one creates an entry for each host in the Cluster's templateValues.
+  templateValues:
+    ingressHosts: |-
+      ${- range index .ClusterValues "hosts" }
+      - host: ${ . }
+      ${- end }
 
   # Path to any values files that need to be passed to helm during install.
   valuesFiles:
@@ -286,8 +297,8 @@ targetCustomizations:
       keepFailHistory: false
 
 # dependsOn allows you to configure dependencies to other bundles. The current
-# bundle will only be deployed, after all dependencies are deployed an
-# accepted state. The default accepted state is the Ready state.
+# bundle will only be deployed, after all dependencies are deployed and in a
+# Ready state.
 dependsOn:
 
   # Format:
@@ -306,16 +317,11 @@ dependsOn:
   #     opni-fleet-examples-fleets-opni-ui-plugin-operator-crd becomes
   #     opni-fleet-examples-fleets-opni-ui-plugin-opera-021f7
   - name: one-multi-cluster-hello-world
-      acceptedStates:
-        - Ready
-        - Modified
+
   # Select bundles to depend on based on their label.
   - selector:
       matchLabels:
         app: weak-monkey
-    acceptedStates:
-      - Ready
-      - Modified
 
 # Ignore fields when monitoring a Bundle. This can be used when Fleet thinks
 # some conditions in Custom Resources makes the Bundle to be in an error state
@@ -349,7 +355,7 @@ These options define the fundamental properties and behavior of the bundle itsel
 
 | `paused` | If true, the bundle will not be updated on downstream clusters. Instead, it will be marked as *OutOfSync*. You can then manually approve the deployment. | All
 | `labels` | A map of key-value pairs set at the bundle level. These can be used in a `dependsOn.selector` to define dependencies. | All
-| `dependsOn` | A list of bundles that this bundle depends on. The current bundle is deployed only after all dependencies are in an accepted state. Accepted states correspond to any valid  xref:reference/ref-status-fields.adoc#_bundle_statuses[bundle states]. | All
+| `dependsOn` | A list of bundles that this bundle depends on. The current bundle is deployed only after all dependencies are in a *Ready* state. | All
 | `ignore` | Specifies fields to ignore when monitoring bundle status. Useful for preventing false error states from Custom Resources. | All
 | `overrideTargets` | A list of target customizations that override any targets defined in the GitRepo. | All
 |===
@@ -429,8 +435,8 @@ Determines which chart to download from OCI registries.
 
 [NOTE]
 ====
-OCI registries do not support the `+` character in semver tags. Helm replaces `+` with `_` automatically when pushing charts.  
-Use the `+` version in `fleet.yaml`; {product_name} performs the same replacement internally.
+OCI registries do not support the `{plus}` character in semver tags. Helm replaces `{plus}` with `_` automatically when pushing charts.
+Use the `{plus}` version in `fleet.yaml`; {product_name} performs the same replacement internally.
 ====
 
 [#_values]
@@ -442,6 +448,7 @@ Options for customizing Helm chart values.
 | Option | Description | Applies to
 
 | `helm.values` | Key-value pairs passed to Helm as custom values. Supports templating. | Helm
+| `helm.templateValues` | Map of template strings. Each entry is rendered, parsed as YAML and set as a top-level value, replacing the same key from `helm.values`. | Helm
 | `helm.valuesFiles` | Paths to values files passed to Helm. | Helm
 | `helm.valuesFrom` | Load values from ConfigMaps or Secrets in downstream clusters. | Helm
 |===
@@ -505,6 +512,38 @@ Example:
 ${ if hasKey .ClusterLabels "LABELNAME" }${ .ClusterLabels.LABELNAME }${ else }missing${ end}
 ----
 ====
+
+[#_helm_templatevalues]
+==== `helm.templateValues`
+
+Because `helm.values` must be valid YAML before it is templated, you cannot use `range` or `if` there to build lists or maps. `helm.templateValues` lifts this restriction. It is a map of strings, and {product_name} renders each string with the same template context as `helm.values`, then parses the result as YAML.
+
+* Each key becomes a top-level key in the Helm values.
+* If the same key also exists in `helm.values`, the `helm.templateValues` entry replaces it entirely. The two are not merged.
+* Keys in `helm.templateValues` are not available as template variables, so `helm.values` cannot reference them.
+* `helm.templateValues` is not the same as the `templateValues` field of the `Cluster` resource, which templates read as `.ClusterValues`.
+* If `helm.disablePreProcess` is `true`, `helm.templateValues` is ignored.
+
+Example:
+
+[source,yaml]
+----
+helm:
+  templateValues:
+    ingressHosts: |-
+      ${- range index .ClusterValues "hosts" }
+      - host: ${ . }
+      ${- end }
+----
+
+Using `index` keeps the deployment working on clusters that do not set `hosts`. They get no host entries. For a cluster whose `spec.templateValues` contains `hosts: [app.example.com, app.example.org]`, this renders as:
+
+[source,yaml]
+----
+ingressHosts:
+- host: app.example.com
+- host: app.example.org
+----
 
 [#_helm_deployment]
 == Helm Deployment
@@ -590,6 +629,7 @@ These options let you customize deployments for specific clusters or cluster gro
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.ReleaseName]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.Repo]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.TakeOwnership]
+* xref:/reference/ref-crds.adoc#_helmoptions[Helm.TemplateValues]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.TimeoutSeconds]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.ValuesFrom]
 * xref:/reference/ref-crds.adoc#_helmoptions[Helm.Values]
